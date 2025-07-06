@@ -11,8 +11,8 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
     function main(&$paymentProcessor, &$input, &$ids): void {
         try {
             $contributionStatuses = array_flip(CRM_Contribute_BAO_Contribution::buildOptions('contribution_status_id', 'validate'));
-            $contributionID = self::retrieve('contributionID', 'Integer');
-            $contactID = self::retrieve('contactID', 'Integer');
+            $contributionID = $this->retrieve('contributionID', 'Integer');
+            $contactID = $this->retrieve('contactID', 'Integer');
             $contribution = $this->getContribution($contributionID, $contactID);
 
             $statusID = CRM_Core_DAO::getFieldValue('CRM_Contribute_DAO_Contribution',
@@ -37,18 +37,18 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
     function getInput(&$input, &$ids) {
         $input = array(
             // GET Parameters
-            'module' => self::retrieve('md', 'String'),
-            'component' => self::retrieve('md', 'String'),
-            'qfKey' => self::retrieve('qfKey', 'String', false),
-            'contributionID' => self::retrieve('contributionID', 'String'),
-            'contactID' => self::retrieve('contactID', 'String'),
-            'eventID' => self::retrieve('eventID', 'String', false),
-            'participantID' => self::retrieve('participantID', 'String', false),
-            'membershipID' => self::retrieve('membershipID', 'String', false),
-            'contributionPageID' => self::retrieve('contributionPageID', 'String', false),
-            'relatedContactID' => self::retrieve('relatedContactID', 'String', false),
-            'onBehalfDupeAlert' => self::retrieve('onBehalfDupeAlert', 'String', false),
-            'returnURL' => self::retrieve('returnURL', 'String', false),
+            'module' => $this->retrieve('md', 'String'),
+            'component' => $this->retrieve('md', 'String'),
+            'qfKey' => $this->retrieve('qfKey', 'String', false),
+            'contributionID' => $this->retrieve('contributionID', 'String'),
+            'contactID' => $this->retrieve('contactID', 'String'),
+            'eventID' => $this->retrieve('eventID', 'String', false),
+            'participantID' => $this->retrieve('participantID', 'String', false),
+            'membershipID' => $this->retrieve('membershipID', 'String', false),
+            'contributionPageID' => $this->retrieve('contributionPageID', 'String', false),
+            'relatedContactID' => $this->retrieve('relatedContactID', 'String', false),
+            'onBehalfDupeAlert' => $this->retrieve('onBehalfDupeAlert', 'String', false),
+            'returnURL' => $this->retrieve('returnURL', 'String', false),
         );
 
         $ids = array(
@@ -76,7 +76,6 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
         } else {
             $returnURL = ($url . '&' . $key . '=' . $value);
         }
-
 
         // Print the tpl to redirect to success
         $template = CRM_Core_Smarty::singleton();
@@ -109,7 +108,6 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
     }
 
     function base64_url_decode($input) {
-        return base64_decode(strstr($input, '-_', '+/:w
-        '));
+        return base64_decode(strtr($input, '-_', '+/'));
     }
 }

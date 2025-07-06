@@ -6,6 +6,8 @@
  * @author Gregory Shilin <gshilin@gmail.com>
  */
 
+use Civi\Api4\FinancialTrxn;
+
 require_once 'CRM/Core/Payment.php';
 require_once 'BBPriorityCashIPN.php';
 
@@ -90,6 +92,28 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
         }
         $this->_component = $component;
 
+	$contributionID = $params['contributionID'];
+	$amount = $params['total_amount'];
+	$currencyName = $params['custom_1706'] ?? $params['currencyID'];
+	\Civi\Api4\Contribution::update()
+		->addWhere('id', '=', $contributionID)
+		->addValue('currency', $currencyName)
+		->execute();
+        if ($currencyName == "EUR") {
+            $currency = 978;
+        } elseif ($currencyName == "USD") {
+            $currency = 2;
+        } else { // ILS -- default
+            $currency = 1;
+        }
+        $trxn_id = $this->setTrxnId($this->_mode);
+	$financialTypeID = self::array_column_recursive_first($params, "financialTypeID");
+        if (empty($financialTypeID)) {
+            $financialTypeID = self::array_column_recursive_first($params, "financial_type_id");
+        }
+	$financialAccountID = civicrm_api3('EntityFinancialAccount', 'getvalue', array('return' => "financial_account_id", 'entity_id' => $financialTypeID, 'account_relationship' => 1,));
+	$this->createFinancialTrxn($contributionID, $amount, $params['trxn_id'], $this->_paymentProcessor["id"] , $financialAccountID, $currency);
+
         if (array_key_exists('successURL', $params)) {
             $returnURL = $params['successURL'];
             $cancelURL = $params['cancelURL'];
@@ -101,7 +125,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
             );
         }
 
-        $merchantUrlParams = "contactID={$params['contactID']}&contributionID={$params['contributionID']}";
+        $merchantUrlParams = "contactID={$params['contactID']}&contributionID={$contributionID}";
         if ($component == 'event') {
             $merchantUrlParams .= "&eventID={$params['eventID']}&participantID={$params['participantID']}";
         } else {
@@ -154,4 +178,46 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
     function base64_url_encode($input) {
         return strtr(base64_encode($input), '+/', '-_');
     }
+
+    // Record financial transaction
+  private function createFinancialTrxn($contributionID, $totalAmount, $trxn_id, $paymentProcessorID, $financialAccountId, $currency) {
+        $ftParams = [
+          'total_amount' => $totalAmount,
+          'contribution_id' => $contributionID,
+	  'entity_id' => $contributionID,
+          'trxn_id' => $trxn_id ?? $contributionID,
+          'payment_processor_id' => $paymentProcessorID,
+          'status_id:name' => 'Completed',
+	  'currency' => $currency,
+	  'to_financial_account_id' => $financialAccountId,
+        ];
+	FinancialTrxn::create(false)
+		->setValues($ftParams)
+		->execute();
+  }
+
+        public function setTrxnId(string $mode): string {
+        $query = "SELECT MAX(trxn_id) AS trxn_id FROM civicrm_contribution WHERE trxn_id LIKE '{$mode}_%' LIMIT 1";
+        $tid = CRM_Core_Dao::executeQuery($query);
+        if (!$tid->fetch()) {
+            throw new CRM_Core_Exception('Could not find contribution max id');
+        }
+        $trxn_id = strval($tid->trxn_id);
+        $trxn_id = str_replace("{$mode}_", '', $trxn_id);
+        $trxn_id = intval($trxn_id) + 1;
+        $uniqid = uniqid();
+        return "{$mode}_{$trxn_id}_{$uniqid}";
+    }
+
+    /* Find first occurrence of needle somewhere in haystack (on all levels) */
+    static function array_column_recursive_first(array $haystack, $needle) {
+        $found = [];
+        array_walk_recursive($haystack, function ($value, $key) use (&$found, $needle) {
+            if (gettype($key) == 'string' && $key == $needle) {
+                $found[] = $value;
+            }
+        });
+        return count($found) > 0 ? $found[0] : "";
+    }
+
 }
