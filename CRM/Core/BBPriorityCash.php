@@ -95,7 +95,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
 	$contributionID = $params['contributionID'];
 	$amount = $params['total_amount'];
 	$currencyName = $params['custom_1706'] ?? $params['currencyID'];
-	\Civi\Api4\Contribution::update()
+	\Civi\Api4\Contribution::update(false)
 		->addWhere('id', '=', $contributionID)
 		->addValue('currency', $currencyName)
 		->execute();

@@ -14,7 +14,8 @@ class CRM_BbpriorityCash_Upgrader extends CRM_Extension_Upgrader_Base {
       $xmlfile = CRM_Core_Resources::singleton()->getPath('info.kabbalah.payment.bbpriorityCash','info.xml');
       $myxml = simplexml_load_file($xmlfile);
       $version = (string)$myxml->version;
-      CRM_Core_BAO_Setting::setItem($version, 'BB Payments Extension', 'bb_extension_version');
+      //CRM_Core_BAO_Setting::setItem($version, 'BB Payments Extension', 'bb_extension_version');
+      \Civi::settings()->set('bb_extension_version', $version);
     }
     catch (Exception $e) {
       // ignore
