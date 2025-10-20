@@ -2,10 +2,15 @@
 
 use Civi\Api4\Contribution;
 
-class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
+class CRM_Core_Payment_BBPriorityCashIPN {
+    private array $_inputParameters = [];
+
     function __construct($inputData) {
         $this->setInputParameters($inputData);
-        parent::__construct();
+    }
+
+    private function setInputParameters($inputData) {
+        $this->_inputParameters = $inputData;
     }
 
     function main(&$paymentProcessor, &$input, &$ids): void {
@@ -15,22 +20,23 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
             $contactID = $this->retrieve('contactID', 'Integer');
             $contribution = $this->getContribution($contributionID, $contactID);
 
-            $statusID = CRM_Core_DAO::getFieldValue('CRM_Contribute_DAO_Contribution',
-                $contribution->id, 'contribution_status_id'
-            );
+            $statusID = $contribution['contribution_status_id'];
             if ($statusID === $contributionStatuses['Completed']) {
                 Civi::log('BBPCash IPN')->debug('returning since contribution has already been handled');
                 return;
             }
-            $contribution->contribution_status_id = $contributionStatuses['Completed'];
-            $contribution->trxn_id = 'Cash-' . $contribution->invoice_id;
-            $contribution->update();
+
+            Contribution::update(false)
+                ->addWhere('id', '=', $contribution['id'])
+                ->addValue('contribution_status_id', $contributionStatuses['Completed'])
+                ->addValue('trxn_id', 'Cash-' . $contribution['invoice_id'])
+                ->execute();
 
             $this->redirectSuccess($input);
             CRM_Utils_System::civiExit();
-        } catch (CRM_Core_Exception $e) {
+        } catch (Exception $e) {
             Civi::log('BBPCash IPN')->debug($e->getMessage());
-            echo 'Invalid or missing data';
+            echo 'Invalid or missing data: ' . $e->getMessage();
         }
     }
 
@@ -90,21 +96,30 @@ class CRM_Core_Payment_BBPriorityCashIPN extends CRM_Core_Payment_BaseIPN {
             FALSE
         );
         if ($abort && $value === NULL) {
-            throw new CRM_Core_Exception("Could not find an entry for $name");
+            throw new Exception("Could not find an entry for $name");
         }
         return $value;
     }
 
-    private function getContribution($contribution_id, $contactID) {
-        $contribution = new CRM_Contribute_BAO_Contribution();
-        $contribution->id = $contribution_id;
-        if (!$contribution->find(TRUE)) {
-            throw new CRM_Core_Exception('Failure: Could not find contribution record for ' . (int)$contribution->id, NULL, ['context' => "Could not find contribution record: {$contribution->id} in IPN request: "]);
+    private function getContribution($contribution_id, $contactID): array {
+        try {
+            $contribution = Contribution::get(false)
+                ->addWhere('id', '=', $contribution_id)
+                ->execute()
+                ->first();
+
+            if (!$contribution) {
+                throw new Exception('Failure: Could not find contribution record for ' . (int)$contribution_id);
+            }
+
+            if ((int)$contribution['contact_id'] !== $contactID) {
+                Civi::log("Contact ID in IPN not found but contact_id found in contribution.");
+            }
+
+            return $contribution;
+        } catch (Exception $e) {
+            throw new Exception('Failure: Could not find contribution record for ' . (int)$contribution_id);
         }
-        if ((int)$contribution->contact_id !== $contactID) {
-            Civi::log("Contact ID in IPN not found but contact_id found in contribution.");
-        }
-        return $contribution;
     }
 
     function base64_url_decode($input) {

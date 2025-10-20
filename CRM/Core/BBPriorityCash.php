@@ -7,6 +7,8 @@
  */
 
 use Civi\Api4\FinancialTrxn;
+use Civi\Api4\EntityFinancialAccount;
+use Civi\Api4\Contribution;
 
 require_once 'CRM/Core/Payment.php';
 require_once 'BBPriorityCashIPN.php';
@@ -15,10 +17,10 @@ require_once 'BBPriorityCashIPN.php';
 /**
  * BBPriorityCash payment processor
  */
-class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
+class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
     protected $_mode = NULL;
 
-    protected $_params = array();
+    protected $_params = [];
 
     /**
      * Constructor.
@@ -29,7 +31,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
      * @param $paymentProcessor
      *
      */
-    public function __construct($mode, &$paymentProcessor) {
+    public function __construct(string $mode, &$paymentProcessor) {
         $this->_mode = $mode;
         $this->_paymentProcessor = $paymentProcessor;
         $this->_setParam('processorName', 'BB Payment Cash');
@@ -41,7 +43,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
      * @return string
      *   the error message if any
      */
-    public function checkConfig() {
+    public function checkConfig(): ?string {
         return NULL;
     }
 
@@ -95,7 +97,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
 	$contributionID = $params['contributionID'];
 	$amount = $params['total_amount'];
 	$currencyName = $params['custom_1706'] ?? $params['currencyID'];
-	\Civi\Api4\Contribution::update(false)
+	Contribution::update(false)
 		->addWhere('id', '=', $contributionID)
 		->addValue('currency', $currencyName)
 		->execute();
@@ -111,7 +113,12 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
         if (empty($financialTypeID)) {
             $financialTypeID = self::array_column_recursive_first($params, "financial_type_id");
         }
-	$financialAccountID = civicrm_api3('EntityFinancialAccount', 'getvalue', array('return' => "financial_account_id", 'entity_id' => $financialTypeID, 'account_relationship' => 1,));
+	$financialAccountID = EntityFinancialAccount::get(false)
+		->addSelect('financial_account_id')
+		->addWhere('entity_id', '=', $financialTypeID)
+		->addWhere('account_relationship', '=', 1)
+		->execute()
+		->first()['financial_account_id'];
 	$this->createFinancialTrxn($contributionID, $amount, $params['trxn_id'], $this->_paymentProcessor["id"] , $financialAccountID, $currency);
 
         if (array_key_exists('successURL', $params)) {
@@ -200,7 +207,7 @@ class CRM_Core_BBPriorityCash extends CRM_Core_Payment {
         $query = "SELECT MAX(trxn_id) AS trxn_id FROM civicrm_contribution WHERE trxn_id LIKE '{$mode}_%' LIMIT 1";
         $tid = CRM_Core_Dao::executeQuery($query);
         if (!$tid->fetch()) {
-            throw new CRM_Core_Exception('Could not find contribution max id');
+            throw new Exception('Could not find contribution max id');
         }
         $trxn_id = strval($tid->trxn_id);
         $trxn_id = str_replace("{$mode}_", '', $trxn_id);
