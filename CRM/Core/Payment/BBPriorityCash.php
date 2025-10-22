@@ -32,9 +32,20 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
      *
      */
     public function __construct(string $mode, &$paymentProcessor) {
-        $this->_mode = $mode;
-        $this->_paymentProcessor = $paymentProcessor;
-        $this->_setParam('processorName', 'BB Payment Cash');
+        try {
+            error_log("BBPriorityCash __construct called with mode: $mode");
+            error_log("BBPriorityCash __construct paymentProcessor: " . print_r($paymentProcessor, true));
+
+            $this->_mode = $mode;
+            $this->_paymentProcessor = $paymentProcessor;
+            $this->_setParam('processorName', 'BB Payment Cash');
+
+            error_log("BBPriorityCash __construct completed successfully");
+        } catch (\Exception $e) {
+            error_log("BBPriorityCash __construct EXCEPTION: " . $e->getMessage());
+            error_log("BBPriorityCash __construct trace: " . $e->getTraceAsString());
+            throw $e;
+        }
     }
 
     /**
@@ -44,6 +55,7 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
      *   the error message if any
      */
     public function checkConfig(): ?string {
+        error_log("BBPriorityCash checkConfig called");
         return NULL;
     }
 
@@ -77,13 +89,15 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
     }
 
     function doPayment(&$params, $component = 'contribute') {
-        /* DEBUG
-            echo "<pre>";
-            var_dump($this->_paymentProcessor);
-            var_dump($params);
-            echo "</pre>";
-            exit();
-        */
+        try {
+            // Enhanced error logging with backtrace
+            try {
+                \Drupal::logger('bbprioritycash')->info('doPayment called with params: @params', [
+                    '@params' => print_r($params, TRUE)
+                ]);
+            } catch (\Exception $e) {
+                error_log('BBPriorityCash doPayment params: ' . print_r($params, true));
+            }
 
         if ($component != 'contribute' && $component != 'event') {
             Civi::log()->error('bbprioritycc_payment_exception',
@@ -113,13 +127,17 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         if (empty($financialTypeID)) {
             $financialTypeID = self::array_column_recursive_first($params, "financial_type_id");
         }
-	$financialAccountID = EntityFinancialAccount::get(false)
+	$result = EntityFinancialAccount::get(false)
 		->addSelect('financial_account_id')
 		->addWhere('entity_id', '=', $financialTypeID)
 		->addWhere('account_relationship', '=', 1)
 		->execute()
-		->first()['financial_account_id'];
-	$this->createFinancialTrxn($contributionID, $amount, $params['trxn_id'], $this->_paymentProcessor["id"] , $financialAccountID, $currency);
+		->first();
+	if (empty($result)) {
+		throw new \CRM_Core_Exception("Unable to find financial account for financial type ID: {$financialTypeID}");
+	}
+	$financialAccountID = $result['financial_account_id'];
+	$this->createFinancialTrxn($contributionID, $amount, $trxn_id, $this->_paymentProcessor["id"] , $financialAccountID, $currency);
 
         if (array_key_exists('successURL', $params)) {
             $returnURL = $params['successURL'];
@@ -140,7 +158,7 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
             if ($membershipID) {
                 $merchantUrlParams .= "&membershipID=$membershipID";
             }
-            $contributionPageID = CRM_Utils_Array::value('contributionPageID', $params) ||
+            $contributionPageID = CRM_Utils_Array::value('contributionPageID', $params) ?:
                 CRM_Utils_Array::value('contribution_page_id', $params);
             if ($contributionPageID) {
                 $merchantUrlParams .= "&contributionPageID=$contributionPageID";
@@ -161,11 +179,33 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
             . '&md=' . $component . '&qfKey=' . $params["qfKey"] . '&' . $merchantUrlParams
             . '&returnURL=' . $this->base64_url_encode($returnURL);
 
-        $template = CRM_Core_Smarty::singleton();
-        $template->assign('url', $merchantUrl);
-        print $template->fetch('CRM/Core/Payment/BbpriorityCash.tpl');
+            $template = CRM_Core_Smarty::singleton();
+            $template->assign('url', $merchantUrl);
+            print $template->fetch('CRM/Core/Payment/BbpriorityCash.tpl');
 
-        CRM_Utils_System::civiExit();
+            CRM_Utils_System::civiExit();
+        } catch (\Exception $e) {
+            $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+            $backtraceStr = '';
+            foreach ($backtrace as $i => $trace) {
+                $backtraceStr .= "#$i ";
+                $backtraceStr .= isset($trace['file']) ? $trace['file'] : '[internal]';
+                $backtraceStr .= '(' . (isset($trace['line']) ? $trace['line'] : '?') . '): ';
+                $backtraceStr .= (isset($trace['class']) ? $trace['class'] . $trace['type'] : '');
+                $backtraceStr .= $trace['function'] . "()\n";
+            }
+
+            error_log("==================== BBPriorityCash Exception ====================");
+            error_log("Exception Message: " . $e->getMessage());
+            error_log("Exception Type: " . get_class($e));
+            error_log("Exception File: " . $e->getFile() . ':' . $e->getLine());
+            error_log("Exception trace:\n" . $e->getTraceAsString());
+            error_log("Full backtrace:\n" . $backtraceStr);
+            error_log("Params:\n" . print_r($params, true));
+            error_log("================================================================");
+
+            throw $e;
+        }
     }
 
     public function handlePaymentNotification() {
@@ -178,6 +218,28 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
     }
 
 
+    /**
+     * Get the value of a stored parameter.
+     *
+     * @param string $field
+     * @param bool $xmlSafe
+     * @return string
+     *   value of the field, or empty string if the field is not set
+     */
+    public function _getParam(string $field, bool $xmlSafe = FALSE): string {
+        $value = $this->_params[$field] ?? '';
+        if ($xmlSafe) {
+            $value = str_replace(['&', '"', "'", '<', '>'], '', $value);
+        }
+        return $value;
+    }
+
+    /**
+     * Set a field to the specified value.
+     *
+     * @param string $field
+     * @param string $value
+     */
     public function _setParam(string $field, string $value) {
         $this->_params[$field] = $value;
     }
