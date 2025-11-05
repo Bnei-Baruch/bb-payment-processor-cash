@@ -30,7 +30,7 @@ function bbpriorityCash_civicrm_install() {
     'name' => 'BBPCash',
     'title' => 'BB Priority CASH Payment Processor',
     'description' => 'BB Priority Cash Payment Processor',
-    'class_name' => 'BBPriorityCash',
+    'class_name' => 'Payment_BBPriorityCash',
     'billing_mode' => 'notify', // Corresponds to the Processor Type: Form (1), Button (2), Special (3) or Notify (4)
     'user_name_label' => 'User',
     'password_label' => 'Password',

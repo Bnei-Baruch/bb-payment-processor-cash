@@ -10,10 +10,6 @@ use Civi\Api4\FinancialTrxn;
 use Civi\Api4\EntityFinancialAccount;
 use Civi\Api4\Contribution;
 
-require_once 'CRM/Core/Payment.php';
-require_once 'BBPriorityCashIPN.php';
-
-
 /**
  * BBPriorityCash payment processor
  */
