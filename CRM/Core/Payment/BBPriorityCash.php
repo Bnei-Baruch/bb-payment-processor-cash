@@ -28,20 +28,9 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
    *
    */
   public function __construct(string $mode, &$paymentProcessor) {
-    try {
-      error_log("BBPriorityCash __construct called with mode: $mode");
-      error_log("BBPriorityCash __construct paymentProcessor: " . print_r($paymentProcessor, true));
-
       $this->_mode = $mode;
       $this->_paymentProcessor = $paymentProcessor;
       $this->_setParam('processorName', 'BB Payment Cash');
-
-      error_log("BBPriorityCash __construct completed successfully");
-    } catch (\Exception $e) {
-      error_log("BBPriorityCash __construct EXCEPTION: " . $e->getMessage());
-      error_log("BBPriorityCash __construct trace: " . $e->getTraceAsString());
-      throw $e;
-    }
   }
 
   /**
@@ -51,7 +40,6 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
    *   the error message if any
    */
   public function checkConfig(): ?string {
-    error_log("BBPriorityCash checkConfig called");
     return NULL;
   }
 
