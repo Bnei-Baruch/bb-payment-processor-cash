@@ -16,7 +16,7 @@
   </compatibility>
   <comments>This is mostly tested module</comments>
   <civix>
-    <namespace>CRM/BbpriorityCash</namespace>
+    <namespace>CRM/BBPriorityCash</namespace>
     <format>24.09.1</format>
   </civix>
   <mixins>
