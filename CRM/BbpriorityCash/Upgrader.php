@@ -30,6 +30,77 @@ class CRM_BbpriorityCash_Upgrader extends CRM_Extension_Upgrader_Base {
   }
 
   /**
+   * Repair the currency on financial transactions this processor wrote.
+   *
+   * doPayment used to pass a Pelecard numeric currency code — 1 for ILS, 2 for
+   * USD, 978 for EUR — into civicrm_financial_trxn.currency, which is
+   * varchar(3) holding a civicrm_currency.name.
+   *
+   * The numbers are not what ends up in the column. CRM_Financial_BAO_FinancialTrxn
+   * (see its create path, "correct the currency value") tests the incoming code
+   * against the real currency list and silently substitutes the site default
+   * when it fails. So a EUR or USD cash payment was recorded against the
+   * default currency instead, while its contribution kept the right one — a
+   * wrong but valid value, which is why nothing ever flagged it.
+   *
+   * Matched on that disagreement rather than on the numbers, which never
+   * survive. Restored from the contribution, which was always correct. Scoped
+   * to this processor by class_name, so no other processor's rows are touched.
+   *
+   * @return TRUE on success
+   */
+  public function upgrade_3001() {
+    $this->ctx->log->info('Applying update 3001: repair cash financial_trxn currency');
+
+    $scope = "
+      FROM civicrm_financial_trxn ft
+      INNER JOIN civicrm_entity_financial_trxn eft
+              ON eft.financial_trxn_id = ft.id
+             AND eft.entity_table = 'civicrm_contribution'
+      INNER JOIN civicrm_contribution co
+              ON co.id = eft.entity_id
+      WHERE ft.payment_processor_id IN (
+              SELECT pp.id
+              FROM civicrm_payment_processor pp
+              INNER JOIN civicrm_payment_processor_type ppt
+                      ON ppt.id = pp.payment_processor_type_id
+              WHERE ppt.class_name = 'Payment_BBPriorityCash'
+            )
+        AND ft.currency <> co.currency
+        AND co.currency REGEXP '^[A-Z]{3}$'
+    ";
+
+    $before = CRM_Core_DAO::singleValueQuery("SELECT COUNT(*) {$scope}");
+    $this->ctx->log->info("update 3001: {$before} financial transactions to repair");
+
+    if ($before > 0) {
+      CRM_Core_DAO::executeQuery("
+        UPDATE civicrm_financial_trxn ft
+        INNER JOIN civicrm_entity_financial_trxn eft
+                ON eft.financial_trxn_id = ft.id
+               AND eft.entity_table = 'civicrm_contribution'
+        INNER JOIN civicrm_contribution co
+                ON co.id = eft.entity_id
+        SET ft.currency = co.currency
+        WHERE ft.payment_processor_id IN (
+                SELECT pp.id
+                FROM civicrm_payment_processor pp
+                INNER JOIN civicrm_payment_processor_type ppt
+                        ON ppt.id = pp.payment_processor_type_id
+                WHERE ppt.class_name = 'Payment_BBPriorityCash'
+              )
+          AND ft.currency <> co.currency
+          AND co.currency REGEXP '^[A-Z]{3}$'
+      ");
+
+      $after = CRM_Core_DAO::singleValueQuery("SELECT COUNT(*) {$scope}");
+      $this->ctx->log->info("update 3001: repaired " . ($before - $after) . ", {$after} left");
+    }
+
+    return TRUE;
+  }
+
+  /**
    * Standard: run an uninstall script
    */
   public function uninstall() {
