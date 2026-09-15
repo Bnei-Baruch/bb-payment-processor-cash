@@ -100,14 +100,11 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         ->addWhere('id', '=', $contributionID)
         ->addValue('currency', $currencyName)
         ->execute();
-      if ($currencyName == "EUR") {
-        $currency = 978;
-      } elseif ($currencyName == "USD") {
-        $currency = 2;
-      } else { // ILS -- default
-        $currency = 1;
-      }
-      $trxn_id = $this->setTrxnId($this->_mode);
+      // Same id the IPN puts on the contribution, read from the same place, so
+      // the contribution and its financial transaction can be joined by eye.
+      // The contribution already exists by the time a processor is called, so
+      // invoice_id is available here and needs no placeholder.
+      $trxn_id = 'Cash-' . $this->getInvoiceId($contributionID);
       $financialTypeID = self::array_column_recursive_first($params, "financialTypeID");
       if (empty($financialTypeID)) {
         $financialTypeID = self::array_column_recursive_first($params, "financial_type_id");
@@ -122,7 +119,7 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         throw new \CRM_Core_Exception("Unable to find financial account for financial type ID: {$financialTypeID}");
       }
       $financialAccountID = $result['financial_account_id'];
-      $this->createFinancialTrxn($contributionID, $amount, $trxn_id, $this->_paymentProcessor["id"], $financialAccountID, $currency);
+      $this->createFinancialTrxn($contributionID, $amount, $trxn_id, $this->_paymentProcessor["id"], $financialAccountID, $currencyName);
 
       if (array_key_exists('successURL', $params)) {
         $returnURL = $params['successURL'];
@@ -203,18 +200,22 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         return;
       }
       $activityIds = array_map('intval', $ids);
-      try {
-        // Update status_id and custom field for all activities
-        $result = \Civi\Api4\Activity::update(false)
-          ->addWhere('id', 'IN', $activityIds)
-          ->addValue('status_id', 2)
-          ->addValue('Registration_for_meals.ID_for_the_payment', $contributionID)
-          ->execute();
-      } catch (Exception $e) {
-        // Ignore error
-      }
+      // Update status_id and custom field for all activities
+      \Civi\Api4\Activity::update(false)
+        ->addWhere('id', 'IN', $activityIds)
+        ->addValue('status_id', 2)
+        ->addValue('Registration_for_meals.ID_for_the_payment', $contributionID)
+        ->execute();
     } catch (Exception $e) {
-      // Ignore error
+      // Never rethrow: the cash is already in the drawer, so failing here would
+      // leave money collected against no completed contribution. Logged instead,
+      // with the ids needed to finish the job by hand.
+      Civi::log('BBPCash')->error('meal activities not updated: {message}', [
+        'message' => $e->getMessage(),
+        'contributionID' => $contributionID,
+        'contactID' => $contactID,
+        'activityIDs' => $activityIds ?? [],
+      ]);
     }
   }
 
@@ -251,7 +252,12 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         ->addValue('Registration_for_event.id_for_payment', $contributionID)
         ->execute();
     } catch (Exception $e) {
-      // Ignore error
+      // See updateActivitiesViaContribution: logged, never rethrown.
+      Civi::log('BBPCash')->error('event activity not updated: {message}', [
+        'message' => $e->getMessage(),
+        'contributionID' => $contributionID,
+        'activityID' => $activity['id'] ?? NULL,
+      ]);
     }
   }
 
@@ -282,16 +288,20 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
         ->addValue('maser.note', "Activities:" . implode(',', $ids))
         ->execute();
 
-      // Update activities with contributionID
-      \Civi\Api4\Activity::update(false)
-        ->addWhere('id', '=', $activity['id'])
-        ->addValue('status_id', 2)
-        ->addValue('Registration_for_event.id_for_payment', $contributionID)
-        ->execute();
+      // The activities themselves are updated by the caller, which has the
+      // meals field and covers every id. What stood here updated only the last
+      // one the loop above left in scope, and wrote the *event* field on a
+      // meals activity.
 
       return $ids;
     } catch (Exception $e) {
-      // Ignore error
+      // See updateActivitiesViaContribution: logged, never rethrown. Returning
+      // nothing makes the caller skip its own update, which is right — the ids
+      // are not trustworthy if this failed.
+      Civi::log('BBPCash')->error('meal activities not collected: {message}', [
+        'message' => $e->getMessage(),
+        'contributionID' => $contributionID,
+      ]);
     }
   }
 
@@ -352,17 +362,16 @@ class CRM_Core_Payment_BBPriorityCash extends CRM_Core_Payment {
       ->execute();
   }
 
-  public function setTrxnId(string $mode): string {
-    $query = "SELECT MAX(trxn_id) AS trxn_id FROM civicrm_contribution WHERE trxn_id LIKE '{$mode}_%' LIMIT 1";
-    $tid = CRM_Core_Dao::executeQuery($query);
-    if (!$tid->fetch()) {
-      throw new Exception('Could not find contribution max id');
+  private function getInvoiceId($contributionID) {
+    $contribution = Contribution::get(false)
+      ->addSelect('invoice_id')
+      ->addWhere('id', '=', $contributionID)
+      ->execute()
+      ->first();
+    if (empty($contribution['invoice_id'])) {
+      throw new \CRM_Core_Exception("Contribution {$contributionID} has no invoice_id");
     }
-    $trxn_id = strval($tid->trxn_id);
-    $trxn_id = str_replace("{$mode}_", '', $trxn_id);
-    $trxn_id = intval($trxn_id) + 1;
-    $uniqid = uniqid();
-    return "{$mode}_{$trxn_id}_{$uniqid}";
+    return $contribution['invoice_id'];
   }
 
   /* Find first occurrence of needle somewhere in haystack (on all levels) */
